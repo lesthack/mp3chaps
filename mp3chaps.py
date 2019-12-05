@@ -1,105 +1,88 @@
-#!/usr/bin/env python
 # *-* encoding: utf-8 -*-
+#!/usr/bin/env python
 """
 Usage:
-  mp3chaps.py -h
-  mp3chaps.py (-l | -i | -r) <filename>
+  mp3chaps.py -i <mp3file> -c <chaptersfile>
+  mp3chaps.py -l <mp3file>
 
 Options:
-  -h  Show this help text
   -l  List chapters in <filename>
-  -i  Import chapters from <filename>.chapters.txt
-  -r  Remove chapters from <filename>
-
+  -i  Import chapters
+      Example: mp3chaps.py -i <mp3file> -c <chaptersfile>
 """
+from argparse import ArgumentParser
 from eyed3.id3 import Tag
 from eyed3 import core
 from docopt import docopt
 import os
+import sys
 
-def list_chaps(tag):
-  "list chapters in tag"
-  print("Chapters:")
-  for chap in tag.chapters:
-    print(chap.sub_frames.get(b"TIT2")[0]._text)
+reload(sys)
+sys.setdefaultencoding('utf8')
 
-def remove_chaps(tag):
-  "remove all the chapters and save tag to file"
-  chaps = [chap for chap in tag.chapters]
-  for chap in chaps:
-    print("removing {}".format(chap.sub_frames.get(b"TIT2")[0]._text))
-    tag.chapters.remove(chap.element_id)
-  tag.save()
+argp = ArgumentParser(
+    prog = 'mp3chaps',
+    description = '',
+    epilog = 'GPL v3.0',
+)
 
-def parse_chapters_file(fname):
-  filename, ext = os.path.splitext(fname)
-  chapters_fname = "{}.chapters.txt".format(filename)
-  chaps = []
-  with open(chapters_fname, "r") as f:
-    for line in f.readlines():
-      time, title = line.split()[0], " ".join(line.split()[1:])
-      chaps.append((to_millisecs(time), title))
-  return chaps
-
-def add_chapters(tag, fname):
-  chaps = parse_chapters_file(fname)
-  audioFile = core.load(fname)
-  total_length = audioFile.info.time_secs * 1000
-  chaps_ = []
-  for i, chap in enumerate(chaps):
-    if i < (len(chaps)-1):
-      chaps_.append( ((chap[0], chaps[i+1][0]), chap[1]) )
-  chaps_.append( ((chaps[-1][0], total_length), chaps[-1][1]) )
-  index = 0
-  child_ids = []
-  for chap in chaps_:
-    element_id = "ch{}".format(index)
-    times, title = chap
-    new_chap = tag.chapters.set(element_id, times)
-    new_chap.sub_frames.setTextFrame(b"TIT2", u"{}".format(title))
-    child_ids.append(element_id)
-    index += 1
-  tag.table_of_contents.set("toc", child_ids=child_ids)
-  list_chaps(tag)
-  tag.save()
+def show_chapters(tag):
+    "list chapters in tag"
+    print("Chapters:")
+    for chap in tag.chapters:
+        print(chap.sub_frames.get(b"TIT2")[0]._text)
 
 def to_millisecs(time):
   h, m, s = [float(x) for x in time.split(":")]
   return int(1000 * (s + m*60 + h*60*60))
 
-#print to_millisecs("00:10:25.055"))
+def main(mp3file, chaptersfile):
+    total_length = int(core.load(mp3file).info.time_secs * 1000)
+    chapters = []
+    n = 0
 
-def main():
-  "Entry point"
-  args = docopt(__doc__, version="mp3chaps 0.2")
-  tag = Tag()
-  tag.parse(args["<filename>"])
-  if args["-l"]:
-    list_chaps(tag)
-  elif args["-i"]:
-    add_chapters(tag, args["<filename>"])
-  elif args["-r"]:
-    remove_chaps(tag)
+    tag = Tag()
+    tag.parse(mp3file)
+    for i in open(chaptersfile,'r').readlines():
+        chapter_time = to_millisecs(i[0:12])
+        chapter_title = u'{}'.format(i[13:]).rstrip()
+        chapters.append([[chapter_time,0], chapter_title, 'ch_'+str(n)])
+        if n > 0: chapters[n-1][0][1] = chapter_time
+        n+=1
+    chapters[n-1][0][1] = total_length
+    for times, title, id in chapters:
+        chapter_frame = tag.chapters.set(id, tuple(times))
+        chapter_frame.sub_frames.setTextFrame(b"TIT2", title)
+    tag.table_of_contents.set(
+        'toc',
+        child_ids=[e[2] for e in chapters]
+    )
+    show_chapters(tag)
+    tag.save()
 
-if __name__ == '__main__':
-  main()
+argp.add_argument('-i', help='mp3 file input')
+argp.add_argument('-l', help='show a chapter list')
+argp.add_argument('-c', help='chapters file input')
+args = vars(argp.parse_args())
 
-#first we will set chapters with element_id and times tuple (start, end)
-#times are in milliseconds
-#tag.chapters.set("ch1", (0,10000))
-#tag.chapters.set("ch2", (10000, 360000))
-#tag.chapters.set("ch3", (360000, 1800000))
-
-#now we will set titles for each chapter
-#chap1 = tag.chapters.get("ch1")
-#chap1.sub_frames.setTextFrame("TIT2", u"Here is my first chapter title")
-#chap2 = tag.chapters.get("ch2")
-#chap2.sub_frames.setTextFrame("TIT2", u"Here is my second chapter title")
-#chap3 = tag.chapters.get("ch3")
-#chap3.sub_frames.setTextFrame("TIT2", u"Here is my third chapter title")
-
-#don't forget to add chapters to the toc
-#tag.table_of_contents.set("toc", child_ids=["ch1", "ch2", "ch3"])
-
-#last but not least, save our tag
-#tag.save()
+if args['i']:
+    mp3file = args['i']
+    chaptersfile = args['c']
+    if mp3file and chaptersfile:
+        if not os.path.isfile(mp3file):
+            argp.error('File {} not exists'.format(mp3file))
+        if not os.path.isfile(chaptersfile):
+            argp.error('File {} not exists'.format(chaptersfile))
+        main(mp3file, chaptersfile)
+    else:
+        argp.print_help()
+elif args['l']:
+    mp3file = args['l']
+    if mp3file:
+        tag = Tag()
+        tag.parse(mp3file)
+        show_chapters(tag)
+    else:
+        argp.print_help()
+else:
+    argp.print_help()
