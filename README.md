@@ -15,7 +15,7 @@ Just clone this project:
 ```bash
 git clone https://github.com/lesthack/mp3chaps
 cd mp3chaps
-sudo -H pip install requirements.txt
+sudo -H pip install -r requirements.txt
 ```
 
 So, now you can use as follow:
